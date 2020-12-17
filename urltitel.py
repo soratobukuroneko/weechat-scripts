@@ -1,13 +1,14 @@
 import html
 import re
 import weechat
+from socket import timeout
 from urllib.error import URLError
 from urllib.parse import quote, urlsplit, urlunsplit
 from urllib.request import Request, urlopen
 
 SCRIPT_NAME = "urltitel"
 SCRIPT_AUTHOR = "soratobuneko"
-SCRIPT_VERSION = "4"
+SCRIPT_VERSION = "5"
 SCRIPT_LICENCE = "WTFPL"
 SCRIPT_DESCRIPTION = (
     "Display or send titles of URLs from incoming and outcoming messages. "
@@ -81,8 +82,10 @@ def fetch_html(url):
                     return None
         except URLError as err:
             error(
-                "Cannot fetch URL. {}".format(err.reason),
+                "Cannot fetch {}. {}".format(url, err.reason),
             )
+        except timeout:
+            error("Socket timed out while fetching {}".format(url))
 
 
 _re_url = re.compile(r"https?://[\w0-9@:%._\+~#=()?&/\-]+")
@@ -155,6 +158,7 @@ def on_buffer_close(data, buffer):
 
 
 def on_privmsg(data, signal, signal_data):
+    global url_buffer
     server = signal.split(",")[0]
     msg = weechat.info_get_hashtable("irc_message_parse", {"message": signal_data})
     srvchan = "{},{}".format(server, msg["channel"])
