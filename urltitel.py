@@ -1,3 +1,4 @@
+# TODO option ignore chan
 import html
 import re
 import weechat
@@ -8,13 +9,13 @@ from urllib.request import Request, urlopen
 
 SCRIPT_NAME = "urltitel"
 SCRIPT_AUTHOR = "soratobuneko"
-SCRIPT_VERSION = "5"
+SCRIPT_VERSION = "6"
 SCRIPT_LICENCE = "WTFPL"
 SCRIPT_DESCRIPTION = (
     "Display or send titles of URLs from incoming and outcoming messages. "
     + "Also features an optional URL buffer"
 )
-UA = "Mozilla/5.0 (Python) weechat {}".format(SCRIPT_NAME)
+UA = f"Mozilla/5.0 (Python) weechat {SCRIPT_NAME}"
 
 script_options = {
     "timeout": ("3", "Maximum time to wait to fetch URL."),
@@ -37,20 +38,20 @@ script_options = {
 
 def create_buffer():
     global url_buffer
-    BUFFER_NAME = "{}".format(SCRIPT_NAME)
+    BUFFER_NAME = f"{SCRIPT_NAME}"
     url_buffer = weechat.buffer_new(BUFFER_NAME, "", "", "on_buffer_close", "")
     weechat.buffer_set(
-        url_buffer, "title", "URL buffer ({} v{})".format(SCRIPT_NAME, SCRIPT_VERSION)
+        url_buffer, "title", f"URL buffer ({SCRIPT_NAME} v{SCRIPT_VERSION})"
     )
 
 
 def debug(message):
     if script_options["debug"] == "on":
-        weechat.prnt("", "{}: {}".format(SCRIPT_NAME, message))
+        weechat.prnt("", f"{SCRIPT_NAME}: {message}")
 
 
 def error(message):
-    weechat.prnt("", "{}{}: {}".format(weechat.prefix("error"), SCRIPT_NAME, message))
+    weechat.prnt("", f"{weechat.prefix('error')}{SCRIPT_NAME}: {message}")
 
 
 def fetch_html(url):
@@ -68,24 +69,16 @@ def fetch_html(url):
             with urlopen(request, timeout=int(script_options["timeout"])) as res:
                 is_html = bool(re.match(".*/html.*", res.info()["Content-Type"]))
                 if is_html:
-                    debug(
-                        "Got an HTML document. Reading at most {} bytes.".format(
-                            script_options["maxdownload"]
-                        ),
-                    )
-                    html_doc_head = res.read(int(script_options["maxdownload"])).decode(
-                        "utf-8", "replace"
-                    )
+                    debug(f"Got an HTML document. Reading at most {script_options['maxdownload']} bytes.")
+                    html_doc_head = res.read(int(script_options["maxdownload"])).decode()
                     return html.unescape(html_doc_head)
                 else:
                     debug("Not an HTML document.")
                     return None
         except URLError as err:
-            error(
-                "Cannot fetch {}. {}".format(url, err.reason),
-            )
+            error(f"Cannot fetch {url}. {err.reason}")
         except timeout:
-            error("Socket timed out while fetching {}".format(url))
+            error(f"Socket timed out while fetching {url}")
 
 
 _re_url = re.compile(r"https?://[\w0-9@:%._\+~#=()?&/\-]+")
@@ -102,16 +95,16 @@ def find_urls(message):
         return (0, ())
 
     if re.match(r"https?://[^ ]", message) and not re.match(_re_url, message):
-        debug("Failling to match URL in message: {}".format(message))
+        debug(f"Failling to match URL in message: {message}")
 
     for url in re.findall(_re_url, message):
-        debug("Fetching title for URL: {}".format(url))
+        debug(f"Fetching title for URL: {url}")
         html = fetch_html(url)
         if html != None:
             title = get_title(html)
             if title != None and len(title):
                 urls_count += 1
-                debug("Found title: {}".format(title))
+                debug(f"Found title: {title}")
                 if len(title) > int(script_options["maxlength"]):
                     urls.append([url, title[0 : int(script_options["maxlength"])]])
                 else:
@@ -161,34 +154,23 @@ def on_privmsg(data, signal, signal_data):
     global url_buffer
     server = signal.split(",")[0]
     msg = weechat.info_get_hashtable("irc_message_parse", {"message": signal_data})
-    srvchan = "{},{}".format(server, msg["channel"])
+    srvchan = f"{server},{msg['channel']}"
 
     # Parse only messages from configured server/channels
     if not srvchan_in_list(srvchan, script_options["serverchans"].split("|")):
-        debug("Ignoring message from {}/{}".format(server, msg["channel"]))
+        debug(f"Ignoring message from {server}/{msg['channel']}")
         return weechat.WEECHAT_RC_OK
 
     urls_found = find_urls(msg["text"])
     if script_options["urlbuffer"] == "on" and len(urls_found[1]):
         nick = msg["nick"]
         if not len(nick):
-            nick = "{}{}{}".format(
-                weechat.color("*white"),
-                weechat.info_get("irc_nick", server),
-                weechat.color("default"),
-            )
+            nick = f"{weechat.color('*white')}{weechat.info_get('irc_nick', server)}{weechat.color('default')}"
         if not url_buffer:
             create_buffer()
         weechat.prnt(
             url_buffer,
-            "<{}{}@{}{}/{}>\t{}".format(
-                nick,
-                weechat.color("red"),
-                weechat.color("default"),
-                server,
-                msg["channel"],
-                msg["text"],
-            ),
+            f"<{nick}{weechat.color('red')}@{weechat.color('default')}{server}/{msg['channel']}>\t{msg['text']}"
         )
     if urls_found[0]:
         force_send = (
@@ -212,17 +194,15 @@ def show_urls_title(srvchan, urls, force_send):
     if buffer:
         for i, url in enumerate(urls):
             if url != None:
-                debug(
-                    "{} title(s) {} {}".format(action[0], action[1], srvchan),
-                )
+                debug(f"{action[0]} title(s) {action[1]} {srvchan}")
                 if action[0] == ACTION_SEND:
-                    weechat.command(buffer, "url|{}): {}".format(i + 1, url[1]))
+                    weechat.command(buffer, f"url|{i + 1}): {url[1]}")
                 else:  # We have already checked script_options["serverchans"] in on_privmsg
-                    weechat.prnt(buffer, "{}:\t{}".format(i + 1, url[1]))
+                    weechat.prnt(buffer, f"{i + 1}:\t{url[1]}")
                 if script_options["urlbuffer"] == "on":
                     if not url_buffer:
                         create_buffer()
-                    weechat.prnt(url_buffer, "{}:\t{}".format(i + 1, url[1]))
+                    weechat.prnt(url_buffer, f"{i + 1}:\t{url[1]}")
 
 
 def srvchan_in_list(srvchan, srvchan_list):
