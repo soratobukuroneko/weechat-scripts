@@ -9,7 +9,7 @@ from urllib.request import Request, urlopen
 
 SCRIPT_NAME = "urltitel"
 SCRIPT_AUTHOR = "soratobuneko"
-SCRIPT_VERSION = "6"
+SCRIPT_VERSION = "7"
 SCRIPT_LICENCE = "WTFPL"
 SCRIPT_DESCRIPTION = (
     "Display or send titles of URLs from incoming and outcoming messages. "
@@ -71,10 +71,10 @@ def fetch_html(url):
                 if is_html:
                     debug(f"Got an HTML document. Reading at most {script_options['maxdownload']} bytes.")
                     html_doc_head = res.read(int(script_options["maxdownload"])).decode()
-                    return html.unescape(html_doc_head)
+                    return html_doc_head
                 else:
                     debug("Not an HTML document.")
-                    return None
+                    return
         except URLError as err:
             error(f"Cannot fetch {url}. {err.reason}")
         except timeout:
@@ -100,9 +100,9 @@ def find_urls(message):
     for url in re.findall(_re_url, message):
         debug(f"Fetching title for URL: {url}")
         html = fetch_html(url)
-        if html != None:
+        if html is not None:
             title = get_title(html)
-            if title != None and len(title):
+            if title is not None and len(title):
                 urls_count += 1
                 debug(f"Found title: {title}")
                 if len(title) > int(script_options["maxlength"]):
@@ -118,15 +118,15 @@ def find_urls(message):
 _re_whitespace = re.compile(r"\s")
 
 
-def get_title(html):
-    title = re.search(r"(?i)<title ?[^<>]*>([^<>]*)</title>", html)
-    if title == None:
+def get_title(html_doc):
+    title = re.search(r"(?i)<title ?[^<>]*>([^<>]*)</title>", html_doc)
+    if title is None:
         debug("No <title> found.")
-        return None
+        return
     else:
-        title = title.group(1)
+        title = html.unescape(title.group(1))
 
-    # many whitespace to one space
+    # many whitespaces to one space
     stripped_title = ""
     for i, char in enumerate(title):
         if not re.match(_re_whitespace, char):
@@ -193,14 +193,14 @@ def show_urls_title(srvchan, urls, force_send):
     )
     if buffer:
         for i, url in enumerate(urls):
-            if url != None:
+            if url is not None:
                 debug(f"{action[0]} title(s) {action[1]} {srvchan}")
                 if action[0] == ACTION_SEND:
                     weechat.command(buffer, f"url|{i + 1}): {url[1]}")
                 else:  # We have already checked script_options["serverchans"] in on_privmsg
                     weechat.prnt(buffer, f"{i + 1}:\t{url[1]}")
                 if script_options["urlbuffer"] == "on":
-                    if not url_buffer:
+                    if url_buffer is None:
                         create_buffer()
                     weechat.prnt(url_buffer, f"{i + 1}:\t{url[1]}")
 
@@ -233,7 +233,7 @@ for option, default_value in list(script_options.items()):
     else:
         script_options[option] = weechat.config_get_plugin(option)
     weechat.config_set_desc_plugin(
-        option, "{} (default: {})".format(default_value[1], default_value[0])
+        option, f"{default_value[1]} (default: {default_value[0]})"
     )
 
 if script_options["urlbuffer"] == "on":
