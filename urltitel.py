@@ -70,7 +70,7 @@ def fetch_html(url):
                 is_html = bool(re.match(".*/html.*", res.info()["Content-Type"]))
                 if is_html:
                     debug(f"Got an HTML document. Reading at most {script_options['maxdownload']} bytes.")
-                    html_doc_head = res.read(int(script_options["maxdownload"])).decode()
+                    html_doc_head = res.read(int(script_options["maxdownload"])).decode(errors="ignore")
                     return html_doc_head
                 else:
                     debug("Not an HTML document.")
