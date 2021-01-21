@@ -3,19 +3,21 @@ import html
 import re
 import weechat
 from socket import timeout
+from typing import List, Optional
 from urllib.error import URLError
 from urllib.parse import quote, urlsplit, urlunsplit
 from urllib.request import Request, urlopen
 
 SCRIPT_NAME = "urltitel"
 SCRIPT_AUTHOR = "soratobuneko"
-SCRIPT_VERSION = "7"
+SCRIPT_VERSION = "8dev"
 SCRIPT_LICENCE = "WTFPL"
 SCRIPT_DESCRIPTION = (
     "Display or send titles of URLs from incoming and outcoming messages. "
     + "Also features an optional URL buffer"
 )
 UA = f"Mozilla/5.0 (Python) weechat {SCRIPT_NAME}"
+BUFFER_NAME = SCRIPT_NAME
 
 script_options = {
     "timeout": ("3", "Maximum time to wait to fetch URL."),
@@ -35,32 +37,32 @@ script_options = {
     "debug": ("off", "Show debug messages"),
 }
 
+url_buffer = None
 
-def create_buffer():
+def create_buffer() -> None:
     global url_buffer
-    BUFFER_NAME = f"{SCRIPT_NAME}"
     url_buffer = weechat.buffer_new(BUFFER_NAME, "", "", "on_buffer_close", "")
     weechat.buffer_set(
         url_buffer, "title", f"URL buffer ({SCRIPT_NAME} v{SCRIPT_VERSION})"
     )
 
 
-def debug(message):
+def debug(message: str) -> None:
     if script_options["debug"] == "on":
         weechat.prnt("", f"{SCRIPT_NAME}: {message}")
 
 
-def error(message):
+def error(message: str) -> None:
     weechat.prnt("", f"{weechat.prefix('error')}{SCRIPT_NAME}: {message}")
 
 
-def fetch_html(url):
+def fetch_html(url: str) -> Optional[str]:
     # IRI to URL (unicode to ascii)
-    url = urlsplit(url)
-    url = list(url)
-    url[1] = quote(url[1])  # URL encode domain
-    url[2] = quote(url[2])  # URL encode path
-    url = urlunsplit(url)
+    url_split = urlsplit(url)
+    url_list = list(url_split)
+    url_list[1] = quote(url_list[1])  # URL encode domain
+    url_list[2] = quote(url_list[2])  # URL encode path
+    url = urlunsplit(url_list)
     request = Request(url, data=None, headers={"User-Agent": UA})
 
     tries = 2 if script_options["retry"] == "on" else 1
@@ -74,57 +76,36 @@ def fetch_html(url):
                     return html_doc_head
                 else:
                     debug("Not an HTML document.")
-                    return
+                    return None
         except URLError as err:
             error(f"Cannot fetch {url}. {err.reason}")
         except timeout:
             error(f"Socket timed out while fetching {url}")
 
+    return None
+
 
 _re_url = re.compile(r"https?://[\w0-9@:%._\+~#=()?&/\-]+")
 
 
-def find_urls(message):
-    # Found URLs with title [["http://perdu.com", "Vous Etes Perdu ?"], ...]
-    # If URL point to a non HTML document the list element is None. If the
-    # HTML doc has no <title> the list element is ["https://..", None]
-    urls = []
-    urls_count = 0
-
+def find_urls(message: str) -> List[str]:
     if re.match(r"^url\|\d+\): ", message):
-        return (0, ())
+        return []
 
-    if re.match(r"https?://[^ ]", message) and not re.match(_re_url, message):
-        debug(f"Failling to match URL in message: {message}")
-
-    for url in re.findall(_re_url, message):
-        debug(f"Fetching title for URL: {url}")
-        html = fetch_html(url)
-        if html is not None:
-            title = get_title(html)
-            if title is not None and len(title):
-                urls_count += 1
-                debug(f"Found title: {title}")
-                if len(title) > int(script_options["maxlength"]):
-                    urls.append([url, title[0 : int(script_options["maxlength"])]])
-                else:
-                    urls.append([url, title])
-        else:
-            urls.append(None)
-
-    return (urls_count, urls)
+    return re.findall(_re_url, message)
 
 
 _re_whitespace = re.compile(r"\s")
 
 
-def get_title(html_doc):
-    title = re.search(r"(?i)<title ?[^<>]*>([^<>]*)</title>", html_doc)
-    if title is None:
+def get_title(html_doc: str) -> Optional[str]:
+    title = None
+    title_match = re.search(r"(?i)<title ?[^<>]*>([^<>]*)</title>", html_doc)
+    if title_match is None:
         debug("No <title> found.")
-        return
+        return None
     else:
-        title = html.unescape(title.group(1))
+        title = html.unescape(title_match.group(1))
 
     # many whitespaces to one space
     stripped_title = ""
@@ -161,29 +142,39 @@ def on_privmsg(data, signal, signal_data):
         debug(f"Ignoring message from {server}/{msg['channel']}")
         return weechat.WEECHAT_RC_OK
 
-    urls_found = find_urls(msg["text"])
-    if script_options["urlbuffer"] == "on" and len(urls_found[1]):
-        nick = msg["nick"]
-        if not len(nick):
-            nick = f"{weechat.color('*white')}{weechat.info_get('irc_nick', server)}{weechat.color('default')}"
-        if not url_buffer:
-            create_buffer()
-        weechat.prnt(
-            url_buffer,
-            f"<{nick}{weechat.color('red')}@{weechat.color('default')}{server}/{msg['channel']}>\t{msg['text']}"
-        )
-    if urls_found[0]:
-        force_send = (
-            True
-            if script_options["sendfromme"] == "on" and not len(msg["nick"])
-            else False
-        )
-        show_urls_title(srvchan, urls_found[1], force_send)
+    urls = find_urls(msg["text"])
+    titles = []
+    for url in urls:
+        debug(f"Fetching title for {url}")
+        html_doc = fetch_html(url)
+        if html_doc is not None:
+            title = get_title(html_doc)
+            if title is not None and len(title) > 0:
+                if len(title) > int(script_options["maxlength"]):
+                    title = title[0: int(script_options["maxlength"])] + "…"
+                debug(f"Found title: {title}")
+            titles.append(title)
+        else:
+            titles.append(None)
+
+    if len(urls) > 0:
+        if script_options["urlbuffer"] == "on":
+            nick = msg["nick"]
+            if len(nick) == 0:
+                nick = f"{weechat.color('*white')}{weechat.info_get('irc_nick', server)}{weechat.color('default')}"
+            if not url_buffer:
+                create_buffer()
+            weechat.prnt(
+                url_buffer,
+                f"<{nick}{weechat.color('red')}@{weechat.color('default')}{server}/{msg['channel']}>\t{msg['text']}",
+            )
+        force_send = script_options["sendfromme"] == "on" and len(msg["nick"]) == 0
+        show_urls_title(srvchan, titles, force_send)
 
     return weechat.WEECHAT_RC_OK
 
 
-def show_urls_title(srvchan, urls, force_send):
+def show_urls_title(srvchan: str, titles: List[str], force_send: bool) -> None:
     ACTION_SEND = "Sending"
     buffer = weechat.info_get("irc_buffer", srvchan)
     action = (
@@ -191,26 +182,26 @@ def show_urls_title(srvchan, urls, force_send):
         if force_send or srvchan_in_list(srvchan, script_options["replyto"].split("|"))
         else ("Displaying", "on")
     )
-    if buffer:
-        for i, url in enumerate(urls):
-            if url is not None:
+    if buffer is not None:
+        for i, title in enumerate(titles):
+            if title is not None:
                 debug(f"{action[0]} title(s) {action[1]} {srvchan}")
                 if action[0] == ACTION_SEND:
-                    weechat.command(buffer, f"url|{i + 1}): {url[1]}")
+                    weechat.command(buffer, f"url|{i + 1}): {title}")
                 else:  # We have already checked script_options["serverchans"] in on_privmsg
-                    weechat.prnt(buffer, f"{i + 1}:\t{url[1]}")
+                    weechat.prnt(buffer, f"{i + 1}:\t{title}")
                 if script_options["urlbuffer"] == "on":
                     if url_buffer is None:
                         create_buffer()
-                    weechat.prnt(url_buffer, f"{i + 1}:\t{url[1]}")
+                    weechat.prnt(url_buffer, f"{i + 1}:\t{title}")
 
 
-def srvchan_in_list(srvchan, srvchan_list):
-    srvchan = srvchan.lower().split(",")
+def srvchan_in_list(srvchan: str, srvchan_list: List[str]) -> bool:
+    srv_chan = srvchan.lower().split(",")
     for _srvchan in srvchan_list:
-        _srvchan = _srvchan.lower().split(",")
-        if (_srvchan[0] == "*" or srvchan[0] == _srvchan[0]) and (
-            _srvchan[1] == "*" or srvchan[1] == _srvchan[1]
+        _srv_chan = _srvchan.lower().split(",")
+        if (_srv_chan[0] == "*" or srv_chan[0] == _srv_chan[0]) and (
+            _srv_chan[1] == "*" or srv_chan[1] == _srv_chan[1]
         ):
             return True
     return False
