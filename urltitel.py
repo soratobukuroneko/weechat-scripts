@@ -47,7 +47,11 @@ script_options: DefaultDict[str, str] = defaultdict()
 
 url_buffer = None
 
+
 def create_buffer() -> None:
+    """
+    Create URL buffer.
+    """
     global url_buffer
     url_buffer = weechat.buffer_new(BUFFER_NAME, "", "", "on_buffer_close", "")
     weechat.buffer_set(
@@ -56,19 +60,37 @@ def create_buffer() -> None:
 
 
 def debug(message: str) -> None:
+    """
+    Print debug message to weechat console.
+    :param message str: message to print.
+    """
     if script_options["debug"] == "on":
         weechat.prnt("", f"{SCRIPT_NAME}: {message}")
 
 
 def error(message: str) -> None:
+    """
+    Print error message to weechat console.
+    :param message str: message to print.
+    """
     weechat.prnt("", f"{weechat.prefix('error')}{SCRIPT_NAME}: {message}")
 
 
 class Document(NamedTuple):
+    """
+    A fetched document.
+    """
     url: ParseResult
     src: str
 
+
 def fetch_html(url: str) -> Optional[Document]:
+    """
+    Fetch HTML Document at given URL.
+    :param url str: URL to fetch from.
+    :return: a Document if the URL point to an HTML document.
+    :rtype: Optional[Document]
+    """
     # IRI to URL (unicode to ascii)
     url_parsed = urlparse(url)
     url_urlencoded = ParseResult(
@@ -88,14 +110,14 @@ def fetch_html(url: str) -> Optional[Document]:
     for i in range(0, tries):
         try:
             with urlopen(request, timeout=int(script_options["timeout"])) as res:
-                is_html = bool(re.match(".*/html.*", res.info()["Content-Type"]))
+                is_html = bool(re.match(".*/html.*",
+                                        res.info()["Content-Type"]))
                 if is_html:
                     debug(f"Got an HTML document. Reading at most {script_options['maxdownload']} bytes.")
                     html_doc_head = res.read(int(script_options["maxdownload"])).decode(errors="ignore")
                     return Document(url=url_urlencoded, src=html_doc_head)
-                else:
-                    debug("Not an HTML document.")
-                    return None
+                debug("Not an HTML document.")
+                return None
         except URLError as err:
             error(f"Cannot fetch {url}. {err.reason}")
         except timeout:
@@ -108,6 +130,12 @@ _re_url = re.compile(r"https?://[\w0-9@:%._\+~#=()?&/\-]+")
 
 
 def find_urls(message: str) -> List[str]:
+    """
+    Get URLs in a given string.
+    :param message str: string to parse.
+    :return: a list of found URLs.
+    :rtype: List[str]
+    """
     if re.match(r"^url\|\d+\): ", message):
         return []
 
@@ -118,14 +146,20 @@ _re_whitespace = re.compile(r"\s")
 
 
 def get_title(html_doc: Document) -> Optional[str]:
+    """
+    Get the title of an HTML Document.
+    :param html_doc Document: document to parse.
+    :return: Document title.
+    :rtype: str
+    """
     title = None
     title_match = re.search(r"(?i)<title ?[^<>]*>([^<>]*)</title>",
                             html_doc.src)
     if title_match is None:
         debug("No <title> found.")
         return None
-    else:
-        title = html.unescape(title_match.group(1))
+
+    title = html.unescape(title_match.group(1))
 
     # many whitespaces to one space
     stripped_title = ""
@@ -143,45 +177,71 @@ def get_title(html_doc: Document) -> Optional[str]:
 
     return stripped_title
 
+
 class Torrent(NamedTuple):
+    """
+    Torrent informations.
+    """
     id: int
     name: str
 
-def tpb_get_torrent(id: int) -> Torrent:
-    request = Request(f"https://apibay.org/t.php?id={id}",
+
+def tpb_get_torrent(tid: int) -> Torrent:
+    """
+    Fetch torrent informations from the Pirate Bay.
+    :param tid int: torrent id.
+    :return: torrent informations.
+    :rtype: Torrent
+    """
+    request = Request(f"https://apibay.org/t.php?id={tid}",
                       data=None,
                       headers={"User-Agent": UA})
     with urlopen(url=request,
                  timeout=int(script_options["timeout"])) as response:
         json_ = json.load(response)
-        return Torrent(id=id, name=json_["name"])
+        return Torrent(id=tid, name=json_["name"])
 
 
 _re_query_id = re.compile(r"^(?:[^&]*[&])*id=([0-9]+)$(?:[&][^&]*)*")
 
 
-
 def tpb_get_torrent_by_url(url: ParseResult) -> Optional[Torrent]:
+    """
+    Fetch torrent information given is description URL.
+    :param url ParseResult: torrent URL on the Pirate Bay.
+    :return: torrent informations.
+    :rtype: Optional[Torrent]
+    """
     if url.path.endswith("description.php"):
         id_match = re.match(_re_query_id, url.query)
-        return (tpb_get_torrent(id=int(id_match.group(1)))
+        return (tpb_get_torrent(tid=int(id_match.group(1)))
                 if id_match is not None
                 else None)
     return None
 
+
 def on_config_change(data, option, value):
+    """
+    Update runtime options on config change.
+    """
     key = option.split(".")[-1]
     script_options[key] = value
     return weechat.WEECHAT_RC_OK
 
 
 def on_buffer_close(data, buffer):
+    """
+    Buffer close callback.
+    """
     global url_buffer
     url_buffer = None
     return weechat.WEECHAT_RC_OK
 
 
 def on_privmsg(data, signal, signal_data):
+    """
+    Callback for incoming and outcoming IRC messages.
+    """
     global url_buffer
     server = signal.split(",")[0]
     msg = weechat.info_get_hashtable("irc_message_parse",
@@ -227,6 +287,12 @@ def on_privmsg(data, signal, signal_data):
 
 
 def show_urls_title(srvchan: str, titles: List[str], force_send: bool) -> None:
+    """
+    Show or send titles to buffer.
+    :param srvchan str: server and channel name.
+    :param titles List[str]: title list.
+    :param force_send bool: when set always send titles.
+    """
     ACTION_SEND = "Sending"
     buffer = weechat.info_get("irc_buffer", srvchan)
     action = (
@@ -250,6 +316,13 @@ def show_urls_title(srvchan: str, titles: List[str], force_send: bool) -> None:
 
 
 def srvchan_in_list(srvchan: str, srvchan_list: List[str]) -> bool:
+    """
+    Check if a server and channel is in a given list.
+    :param srvchan str: server and channel to look for.
+    :param srvchan_list List[str]: server and channel combination list.
+    :return: True if srvchan is in the list.
+    :rtype: bool
+    """
     srv_chan = srvchan.lower().split(",")
     for _srvchan in srvchan_list:
         _srv_chan = _srvchan.lower().split(",")
