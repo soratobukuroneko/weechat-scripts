@@ -1,17 +1,17 @@
-# TODO option ignore chan
 import html
 import json
 import re
-import weechat
+from collections import defaultdict
 from socket import timeout
-from typing import List, NamedTuple, Optional, Tuple
+from typing import DefaultDict, List, NamedTuple, Optional
 from urllib.error import URLError
 from urllib.parse import ParseResult, quote, urlparse, urlunparse
 from urllib.request import Request, urlopen
+import weechat
 
 SCRIPT_NAME = "urltitel"
 SCRIPT_AUTHOR = "soratobuneko"
-SCRIPT_VERSION = "8"
+SCRIPT_VERSION = "9"
 SCRIPT_LICENCE = "WTFPL"
 SCRIPT_DESCRIPTION = (
     "Display or send titles of URLs from incoming and outcoming messages. "
@@ -20,24 +20,30 @@ SCRIPT_DESCRIPTION = (
 UA = f"Mozilla/5.0 (Python) weechat {SCRIPT_NAME}"
 BUFFER_NAME = SCRIPT_NAME
 
-script_options = {
-    "timeout": ("3", "Maximum time to wait to fetch URL."),
-    "retry": ("off", "Retry fetching URL if it fails the first time."),
-    "maxlength": ("200", "Maximum length of title."),
-    "maxdownload": ("262144", "Maximum size (Bytes) to fetch from URL."),
-    "serverchans": (
-        "*,*",
-        '"|" separated list of server,#channel to parse. for instance: "server0,#channel1|server0,#channel2"',
-    ),
-    "replyto": (
-        "",
-        '"|" separated list of server,#channel for which instead of displaying localy a message we send it to the channel.',
-    ),
-    "sendfromme": ("off", "Alway send titles for URLs sent by ourself."),
-    "urlbuffer": ("off", "Create a buffer to collect the URLs with their titles."),
-    "debug": ("off", "Show debug messages"),
-    "http_rewrite": ("on", "Rewrite HTTP URL to HTTPS")
+OPTIONS = {
+    "debug": ("off",
+              "Show debug messages"),
+    "http_rewrite": ("on",
+                     "Rewrite HTTP URL to HTTPS"),
+    "maxdownload": ("262144",
+                    "Maximum size (Bytes) to fetch from URL."),
+    "maxlength": ("200",
+                  "Maximum length of title."),
+    "replyto": ("",
+                '"|" separated list of server,#channel for which instead of displaying localy a message we send it to the channel.'),
+    "retry": ("off",
+              "Retry fetching URL if it fails the first time."),
+    "sendfromme": ("off",
+                   "Always send titles for URLs sent by ourself."),
+    "serverchans": ("*,*",
+                    '"|" separated list of server,#channel to parse. for instance: "server0,#channel1|server0,#channel2"'),
+    "timeout": ("3",
+                "Maximum time to wait to fetch URL."),
+    "urlbuffer": ("off",
+                  "Create a buffer to collect the URLs with their titles."),
 }
+
+script_options: DefaultDict[str, str] = defaultdict()
 
 url_buffer = None
 
@@ -264,7 +270,7 @@ weechat.register(
     "",
 )
 
-for option, default_value in list(script_options.items()):
+for option, default_value in list(OPTIONS.items()):
     if not weechat.config_is_set_plugin(option):
         weechat.config_set_plugin(option, default_value[0])
         script_options[option] = default_value[0]
