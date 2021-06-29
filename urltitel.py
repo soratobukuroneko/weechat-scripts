@@ -11,7 +11,7 @@ import weechat
 
 SCRIPT_NAME = "urltitel"
 SCRIPT_AUTHOR = "soratobuneko"
-SCRIPT_VERSION = "9"
+SCRIPT_VERSION = "10"
 SCRIPT_LICENCE = "WTFPL"
 SCRIPT_DESCRIPTION = (
     "Display or send titles of URLs from incoming and outcoming messages. "
@@ -92,18 +92,24 @@ def fetch_html(url: str) -> Optional[Document]:
     :rtype: Optional[Document]
     """
     # IRI to URL (unicode to ascii)
+    debug(f"raw URL: {url}")
     url_parsed = urlparse(url)
-    url_urlencoded = ParseResult(
-        scheme=("https" if script_options["http_rewrite"]
-                and url_parsed.scheme == "http"
-                else url_parsed.scheme),
-        netloc=quote(url_parsed.netloc),
-        path=quote(url_parsed.path),
-        params=url_parsed.params,
-        query=url_parsed.query,
-        fragment=url_parsed.fragment
-    )
-    url = urlunparse(url_urlencoded)
+
+    if (url_parsed.netloc.find("%") == -1 and url_parsed.path.find("%") == -1):
+        debug(f"parsed URL: {url_parsed}")
+        url_parsed = ParseResult(
+            scheme=("https" if script_options["http_rewrite"]
+                    and url_parsed.scheme == "http"
+                    else url_parsed.scheme),
+            netloc=quote(url_parsed.netloc),
+            path=quote(url_parsed.path),
+            params=url_parsed.params,
+            query=url_parsed.query,
+            fragment=url_parsed.fragment
+        )
+        debug(f"parsed encoded URL: {url_parsed}")
+        url = urlunparse(url_parsed)
+
     request = Request(url, data=None, headers={"User-Agent": UA})
 
     tries = 2 if script_options["retry"] == "on" else 1
@@ -115,7 +121,7 @@ def fetch_html(url: str) -> Optional[Document]:
                 if is_html:
                     debug(f"Got an HTML document. Reading at most {script_options['maxdownload']} bytes.")
                     html_doc_head = res.read(int(script_options["maxdownload"])).decode(errors="ignore")
-                    return Document(url=url_urlencoded, src=html_doc_head)
+                    return Document(url=url_parsed, src=html_doc_head)
                 debug("Not an HTML document.")
                 return None
         except URLError as err:
